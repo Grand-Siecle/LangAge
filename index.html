@@ -336,7 +336,7 @@
             return lineText.trim();
         }
 
-        function clusterLinesParagraphs(linesData, eps = 0.5, minSamples = 1) {
+        function clusterLinesParagraphs(linesData, eps = 1.5, minSamples = 1) {
             if (linesData.length === 0) return [];
 
             const hposValues = linesData.map(l => l.hpos).sort((a, b) => a - b);
