@@ -53,7 +53,12 @@
         const results = document.getElementById('results');
         let files = [];
 
-        // Drag and drop
+        dropZone.addEventListener('click', (e) => {
+            if (e.target.tagName !== 'BUTTON') {
+                fileInput.click();
+            }
+        });
+
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
             dropZone.classList.add('border-blue-500', 'bg-blue-50');
@@ -75,6 +80,12 @@
 
         function handleFiles(newFiles) {
             files = Array.from(newFiles).filter(f => f.name.endsWith('.zip'));
+            
+            if (files.length === 0) {
+                alert('Aucun fichier ZIP valide détecté. Veuillez sélectionner des fichiers .zip');
+                return;
+            }
+            
             displayFileList();
             processFiles();
         }
@@ -83,20 +94,25 @@
             fileList.innerHTML = files.map((f, i) => {
                 const sizeKB = (f.size / 1024).toFixed(1);
                 return `
-                <div class="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                    <div class="flex items-center">
-                        <svg class="h-5 w-5 text-blue-600 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
-                        </svg>
-                        <span class="text-sm text-slate-700">${f.name}</span>
+                    <div class="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                        <div class="flex items-center">
+                            <svg class="h-5 w-5 text-blue-600 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+                            </svg>
+                            <span class="text-sm text-slate-700">${f.name}</span>
+                        </div>
+                        <span class="text-xs text-slate-500">${sizeKB} KB</span>
                     </div>
-                    <span class="text-xs text-slate-500">${sizeKB} KB</span>
-                </div>
                 `;
             }).join('');
         }
 
         async function processFiles() {
+            if (files.length === 0) {
+                console.log('Aucun fichier à traiter');
+                return;
+            }
+            
             progress.classList.remove('hidden');
             results.innerHTML = '';
 
@@ -140,55 +156,68 @@
         }
 
         function extractTextFromAlto(xmlDoc) {
-            const textBlocks = xmlDoc.getElementsByTagName('TextBlock');
+            const tags = xmlDoc.getElementsByTagName('Tags')[0];
+            const tagMap = buildTagMap(tags);
+            
+            const textBlocks = Array.from(xmlDoc.getElementsByTagName('TextBlock'));
+            
+            const blocksData = textBlocks.map(block => ({
+                element: block,
+                type: getBlockType(block, tagMap),
+                bbox: getBBox(block),
+                vpos: parseFloat(block.getAttribute('VPOS') || 0)
+            }));
+
+            detectNestedZones(blocksData);
+            const orderedBlocks = reorderBlocks(blocksData);
+
             let pageText = '';
 
-            for (let block of textBlocks) {
+            for (let blockData of orderedBlocks) {
+                const block = blockData.element;
+                const blockType = blockData.type;
                 const textLines = Array.from(block.getElementsByTagName('TextLine'));
                 
-                // Extraire les lignes avec leurs positions
                 const linesData = textLines.map(line => ({
                     element: line,
                     hpos: parseFloat(line.getAttribute('HPOS') || 0),
                     vpos: parseFloat(line.getAttribute('VPOS') || 0)
                 }));
 
-                // Grouper les lignes en paragraphes avec DBSCAN
-                const paragraphs = clusterLinesParagraphs(linesData);
+                linesData.sort((a, b) => a.vpos - b.vpos);
 
-                // Traiter chaque paragraphe
-                for (let para of paragraphs) {
-                    let paraText = '';
-                    let prevLine = '';
-
-                    for (let lineData of para) {
-                        const strings = lineData.element.getElementsByTagName('String');
-                        let lineText = '';
-
-                        for (let str of strings) {
-                            let content = str.getAttribute('CONTENT') || '';
-                            const subs = str.getAttribute('SUBS_CONTENT');
-                            
-                            content = normalizeText(content, subs);
-                            lineText += content + ' ';
+                if (blockType === 'CustomZone') {
+                    for (let lineData of linesData) {
+                        const lineText = extractLineText(lineData.element);
+                        if (lineText.trim()) {
+                            pageText += lineText + '\n';
                         }
-
-                        lineText = lineText.trim();
-
-                        // Gestion des césures
-                        if (prevLine.endsWith('-') || prevLine.endsWith('¬')) {
-                            paraText = paraText.slice(0, -1) + lineText;
-                        } else if (prevLine) {
-                            paraText += ' ' + lineText;
-                        } else {
-                            paraText = lineText;
-                        }
-
-                        prevLine = lineText;
                     }
+                    pageText += '\n';
+                } else {
+                    const paragraphs = clusterLinesParagraphs(linesData);
 
-                    if (paraText.trim()) {
-                        pageText += paraText + '\n\n';
+                    for (let para of paragraphs) {
+                        let paraText = '';
+                        let prevLine = '';
+
+                        for (let lineData of para) {
+                            const lineText = extractLineText(lineData.element);
+
+                            if (prevLine.endsWith('-') || prevLine.endsWith('¬')) {
+                                paraText = paraText.slice(0, -1) + lineText;
+                            } else if (prevLine) {
+                                paraText += ' ' + lineText;
+                            } else {
+                                paraText = lineText;
+                            }
+
+                            prevLine = lineText;
+                        }
+
+                        if (paraText.trim()) {
+                            pageText += paraText + '\n\n';
+                        }
                     }
                 }
             }
@@ -196,27 +225,133 @@
             return pageText;
         }
 
+        function getBBox(block) {
+            return {
+                x: parseFloat(block.getAttribute('HPOS') || 0),
+                y: parseFloat(block.getAttribute('VPOS') || 0),
+                width: parseFloat(block.getAttribute('WIDTH') || 0),
+                height: parseFloat(block.getAttribute('HEIGHT') || 0)
+            };
+        }
+
+        function calculateOverlap(bbox1, bbox2) {
+            const x1 = Math.max(bbox1.x, bbox2.x);
+            const y1 = Math.max(bbox1.y, bbox2.y);
+            const x2 = Math.min(bbox1.x + bbox1.width, bbox2.x + bbox2.width);
+            const y2 = Math.min(bbox1.y + bbox1.height, bbox2.y + bbox2.height);
+
+            if (x2 < x1 || y2 < y1) return 0;
+
+            const overlapArea = (x2 - x1) * (y2 - y1);
+            const bbox1Area = bbox1.width * bbox1.height;
+
+            return bbox1Area > 0 ? overlapArea / bbox1Area : 0;
+        }
+
+        function detectNestedZones(blocksData) {
+            for (let i = 0; i < blocksData.length; i++) {
+                const block = blocksData[i];
+                
+                for (let j = 0; j < blocksData.length; j++) {
+                    if (i === j) continue;
+                    
+                    const otherBlock = blocksData[j];
+                    const overlap = calculateOverlap(block.bbox, otherBlock.bbox);
+
+                    if (overlap >= 0.8) {
+                        block.parentZone = otherBlock.type;
+                        block.parentIndex = j;
+                        break;
+                    }
+                }
+            }
+        }
+
+        function reorderBlocks(blocksData) {
+            const runningTitle = [];
+            const numbering = [];
+            const quireMarks = [];
+            const normal = [];
+
+            for (let block of blocksData) {
+                if (block.type === 'QuireMarksZone') {
+                    quireMarks.push(block);
+                } else if (block.type === 'RunningTitleZone' && block.parentZone !== 'MainZone') {
+                    runningTitle.push(block);
+                } else if (block.type === 'NumberingZone' && block.parentZone !== 'MainZone') {
+                    numbering.push(block);
+                } else {
+                    normal.push(block);
+                }
+            }
+
+            runningTitle.sort((a, b) => a.vpos - b.vpos);
+            numbering.sort((a, b) => a.vpos - b.vpos);
+            quireMarks.sort((a, b) => a.vpos - b.vpos);
+
+            return [...runningTitle, ...numbering, ...normal, ...quireMarks];
+        }
+
+        function buildTagMap(tagsElement) {
+            const tagMap = {};
+            if (!tagsElement) return tagMap;
+            
+            const otherTags = tagsElement.getElementsByTagName('OtherTag');
+            for (let tag of otherTags) {
+                const id = tag.getAttribute('ID');
+                const label = tag.getAttribute('LABEL');
+                if (id && label) {
+                    tagMap[id] = label;
+                }
+            }
+            return tagMap;
+        }
+
+        function getBlockType(block, tagMap) {
+            const tagrefs = block.getAttribute('TAGREFS');
+            if (!tagrefs) return 'DefaultZone';
+            
+            const tagIds = tagrefs.split(' ');
+            for (let tagId of tagIds) {
+                const label = tagMap[tagId];
+                if (label && label.endsWith('Zone')) {
+                    return label;
+                }
+            }
+            return 'DefaultZone';
+        }
+
+        function extractLineText(lineElement) {
+            const strings = lineElement.getElementsByTagName('String');
+            let lineText = '';
+
+            for (let str of strings) {
+                let content = str.getAttribute('CONTENT') || '';
+                const subs = str.getAttribute('SUBS_CONTENT');
+                
+                content = normalizeText(content, subs);
+                lineText += content + ' ';
+            }
+
+            return lineText.trim();
+        }
+
         function clusterLinesParagraphs(linesData, eps = 0.5, minSamples = 1) {
             if (linesData.length === 0) return [];
 
-            // Calculer Q1 pour HPOS (25e percentile)
             const hposValues = linesData.map(l => l.hpos).sort((a, b) => a - b);
             const q1 = percentile(hposValues, 25);
 
-            // Ajuster HPOS avec Q1 comme marge
             const positions = linesData.map(line => [
                 line.hpos < q1 ? q1 : line.hpos,
                 line.vpos
             ]);
 
-            // Normalisation (StandardScaler)
             const scaler = createStandardScaler(positions);
             const scaled = scaler ? scaler.transform(positions) : positions;
 
-            // DBSCAN clustering
             const labels = dbscan(scaled, eps, minSamples);
 
-            // Grouper par label
             const clusters = {};
             labels.forEach((label, i) => {
                 if (!clusters[label]) {
@@ -225,7 +360,6 @@
                 clusters[label].push(linesData[i]);
             });
 
-            // Trier chaque cluster par VPOS
             const paragraphs = Object.values(clusters).map(cluster => 
                 cluster.sort((a, b) => a.vpos - b.vpos)
             );
@@ -249,7 +383,6 @@
             const means = [];
             const stds = [];
 
-            // Calculer mean et std pour chaque dimension
             for (let d = 0; d < dims; d++) {
                 const values = points.map(p => p[d]);
                 const mean = values.reduce((a, b) => a + b, 0) / values.length;
@@ -318,7 +451,6 @@
                 const neighbors = getNeighbors(i);
 
                 if (neighbors.length < minSamples) {
-                    // reste bruit
                     continue;
                 } else {
                     expandCluster(i, neighbors, clusterId);
@@ -330,29 +462,20 @@
         }
 
         function normalizeText(text, subs) {
-            // S long -> s
             text = text.replace(/ſ/g, 's');
+            text = text.replace(/'/g, '’');
 
-            // Apostrophe typographique
-            text = text.replace(/'/g, ''');
-
-            // Abréviations
             if (subs && subs !== text) {
-                text = `${text}[${subs}]`;
+                text = text + '[' + subs + ']';
             }
 
-            // Abréviations courantes
             text = text.replace(/ꝰ/g, 'us');
             text = text.replace(/q;/g, 'que');
-            
-            // Tilde sur lettres -> m ou n
             text = text.replace(/ã/g, 'an');
             text = text.replace(/õ/g, 'on');
             text = text.replace(/ẽ/g, 'en');
             text = text.replace(/ĩ/g, 'in');
             text = text.replace(/ũ/g, 'un');
-
-            // Espaces insécables avant ponctuation
             text = text.replace(/\s*([,;:?!])/g, '\u00A0$1');
 
             return text;
@@ -370,18 +493,28 @@
 
         function addResult(filename, success, error = '') {
             const div = document.createElement('div');
-            div.className = `p-4 rounded-lg ${success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`;
-            div.innerHTML = `
-                <div class="flex items-center">
-                    <svg class="h-5 w-5 ${success ? 'text-green-600' : 'text-red-600'} mr-2" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="${success ? 'M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z' : 'M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z'}" clip-rule="evenodd"/>
-                    </svg>
-                    <span class="text-sm font-medium ${success ? 'text-green-800' : 'text-red-800'}">
-                        ${success ? 'Téléchargé : ' : 'Erreur : '}${filename}
-                    </span>
-                </div>
-                ${error ? `<p class="text-xs text-red-600 mt-1 ml-7">${error}</p>` : ''}
-            `;
+            const bgClass = success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200';
+            const iconColor = success ? 'text-green-600' : 'text-red-600';
+            const textColor = success ? 'text-green-800' : 'text-red-800';
+            const iconPath = success 
+                ? 'M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z'
+                : 'M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z';
+            const message = success ? 'Téléchargé : ' : 'Erreur : ';
+            
+            div.className = 'p-4 rounded-lg ' + bgClass;
+            
+            let html = '<div class="flex items-center">';
+            html += '<svg class="h-5 w-5 ' + iconColor + ' mr-2" fill="currentColor" viewBox="0 0 20 20">';
+            html += '<path fill-rule="evenodd" d="' + iconPath + '" clip-rule="evenodd"/>';
+            html += '</svg>';
+            html += '<span class="text-sm font-medium ' + textColor + '">' + message + filename + '</span>';
+            html += '</div>';
+            
+            if (error) {
+                html += '<p class="text-xs text-red-600 mt-1 ml-7">' + error + '</p>';
+            }
+            
+            div.innerHTML = html;
             results.appendChild(div);
         }
     </script>
