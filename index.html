@@ -194,7 +194,7 @@
             text = text.replace(/ſ/g, 's');
 
             // Apostrophe typographique
-            text = text.replace(/'/g, '’'); // ← guillemet typographique correct
+            text = text.replace(/'/g, '’');
 
             // Abréviations
             if (subs && subs !== text) {
@@ -205,18 +205,32 @@
             text = text.replace(/ꝰ/g, 'us');
             text = text.replace(/q;/g, 'que');
             
-            // Tilde sur lettres -> m ou n
-            text = text.replace(/ã/g, 'an');
-            text = text.replace(/õ/g, 'on');
-            text = text.replace(/ẽ/g, 'en');
-            text = text.replace(/ĩ/g, 'in');
-            text = text.replace(/ũ/g, 'un');
+            // --- Étape 1 : marquer les lettres avec tilde ---
+            text = text.replace(/([ãẽĩõũ])/g, '§$1'); // § = marqueur temporaire
+
+            // --- Étape 2 : remplacer les tildes par voyelles nasales ---
+            text = text.replace(/§ã/g, '§an');
+            text = text.replace(/§õ/g, '§on');
+            text = text.replace(/§ẽ/g, '§en');
+            text = text.replace(/§ĩ/g, '§in');
+            text = text.replace(/§ũ/g, '§un');
+
+            // --- Étape 3 : appliquer la règle orthographique SEULEMENT après § ---
+            text = text.replace(/§an([bmp])/g, '§am$1');
+            text = text.replace(/§en([bmp])/g, '§em$1');
+            text = text.replace(/§in([bmp])/g, '§im$1');
+            text = text.replace(/§on([bmp])/g, '§om$1');
+            text = text.replace(/§un([bmp])/g, '§um$1');
+
+            // --- Étape 4 : enlever les marqueurs § ---
+            text = text.replace(/§/g, '');
 
             // Espaces insécables avant ponctuation
             text = text.replace(/\s*([,;:?!])/g, '\u00A0$1');
 
             return text;
         }
+
 
         function downloadText(text, filename) {
             const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
