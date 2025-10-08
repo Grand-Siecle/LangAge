@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LangAge</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen p-6">
+    <div class="max-w-4xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-slate-800 mb-2">LangAge</h1>
+            <p class="text-slate-600">Convertissez vos fichiers ALTO en texte normalisé</p>
+        </header>
+
+        <div class="bg-white rounded-xl shadow-lg p-8 mb-6">
+            <div id="dropZone" class="border-3 border-dashed border-slate-300 rounded-lg p-12 text-center transition-all hover:border-blue-400 hover:bg-blue-50 cursor-pointer">
+                <svg class="mx-auto h-16 w-16 text-slate-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                </svg>
+                <p class="text-lg text-slate-700 mb-2">Glissez-déposez vos fichiers ZIP ici</p>
+                <p class="text-sm text-slate-500 mb-4">ou cliquez pour sélectionner</p>
+                <input type="file" id="fileInput" accept=".zip" multiple class="hidden">
+                <button onclick="document.getElementById('fileInput').click()" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+                    Sélectionner des fichiers
+                </button>
+            </div>
+
+            <div id="fileList" class="mt-6 space-y-2"></div>
+        </div>
+
+        <div id="progress" class="hidden bg-white rounded-xl shadow-lg p-6 mb-6">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-medium text-slate-700">Traitement en cours...</span>
+                <span id="progressText" class="text-sm text-slate-600">0%</span>
+            </div>
+            <div class="w-full bg-slate-200 rounded-full h-2">
+                <div id="progressBar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <div id="results" class="space-y-4"></div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const progress = document.getElementById('progress');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const results = document.getElementById('results');
+        let files = [];
+
+        // Drag and drop
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-blue-500', 'bg-blue-50');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        function handleFiles(newFiles) {
+            files = Array.from(newFiles).filter(f => f.name.endsWith('.zip'));
+            displayFileList();
+            processFiles();
+        }
+
+        function displayFileList() {
+            fileList.innerHTML = files.map((f, i) => {
+                const sizeKB = (f.size / 1024).toFixed(1);
+                return `
+                <div class="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                    <div class="flex items-center">
+                        <svg class="h-5 w-5 text-blue-600 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+                        </svg>
+                        <span class="text-sm text-slate-700">${f.name}</span>
+                    </div>
+                    <span class="text-xs text-slate-500">${sizeKB} KB</span>
+                </div>
+                `;
+            }).join('');
+        }
+
+        async function processFiles() {
+            progress.classList.remove('hidden');
+            results.innerHTML = '';
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const percent = ((i / files.length) * 100).toFixed(0);
+                progressBar.style.width = percent + '%';
+                progressText.textContent = percent + '%';
+
+                try {
+                    const text = await processZip(file);
+                    const filename = file.name.replace('.zip', '.txt');
+                    downloadText(text, filename);
+                    addResult(filename, true);
+                } catch (error) {
+                    console.error('Erreur:', error);
+                    addResult(file.name, false, error.message);
+                }
+            }
+
+            progressBar.style.width = '100%';
+            progressText.textContent = '100%';
+            setTimeout(() => progress.classList.add('hidden'), 2000);
+        }
+
+        async function processZip(file) {
+            const zip = await JSZip.loadAsync(file);
+            let allText = '';
+
+            for (const [filename, zipEntry] of Object.entries(zip.files)) {
+                if (filename.endsWith('.xml') && !zipEntry.dir) {
+                    const content = await zipEntry.async('text');
+                    const parser = new DOMParser();
+                    const xmlDoc = parser.parseFromString(content, 'text/xml');
+                    const pageText = extractTextFromAlto(xmlDoc);
+                    allText += pageText + '\n' + '-'.repeat(80) + '\n\n';
+                }
+            }
+
+            return allText;
+        }
+
+        function extractTextFromAlto(xmlDoc) {
+            const textBlocks = xmlDoc.getElementsByTagName('TextBlock');
+            let pageText = '';
+            let prevBlockType = null;
+
+            for (let block of textBlocks) {
+                const blockType = block.getAttribute('TYPE') || 'default';
+                const textLines = block.getElementsByTagName('TextLine');
+                let blockText = '';
+                let prevLine = '';
+
+                for (let i = 0; i < textLines.length; i++) {
+                    const line = textLines[i];
+                    const strings = line.getElementsByTagName('String');
+                    let lineText = '';
+
+                    for (let str of strings) {
+                        let content = str.getAttribute('CONTENT') || '';
+                        const subs = str.getAttribute('SUBS_CONTENT');
+                        
+                        // Normalisation
+                        content = normalizeText(content, subs);
+                        lineText += content + ' ';
+                    }
+
+                    lineText = lineText.trim();
+
+                    // Gestion des césures
+                    if (prevLine.endsWith('-') || prevLine.endsWith('¬')) {
+                        blockText = blockText.slice(0, -1) + lineText;
+                    } else if (prevLine) {
+                        blockText += ' ' + lineText;
+                    } else {
+                        blockText = lineText;
+                    }
+
+                    prevLine = lineText;
+                }
+
+                if (blockType !== prevBlockType && pageText) {
+                    pageText += '\n\n';
+                }
+
+                pageText += blockText;
+                prevBlockType = blockType;
+            }
+
+            return pageText;
+        }
+
+        function normalizeText(text, subs) {
+            // S long -> s
+            text = text.replace(/ſ/g, 's');
+
+            // Apostrophe typographique
+            text = text.replace(/'/g, '’'); // ← guillemet typographique correct
+
+            // Abréviations
+            if (subs && subs !== text) {
+                text = `${text}[${subs}]`;
+            }
+
+            // Abréviations courantes
+            text = text.replace(/ꝰ/g, 'us');
+            text = text.replace(/q;/g, 'que');
+            
+            // Tilde sur lettres -> m ou n
+            text = text.replace(/ã/g, 'an');
+            text = text.replace(/õ/g, 'on');
+            text = text.replace(/ẽ/g, 'en');
+            text = text.replace(/ĩ/g, 'in');
+            text = text.replace(/ũ/g, 'un');
+
+            // Espaces insécables avant ponctuation
+            text = text.replace(/\s*([,;:?!])/g, '\u00A0$1');
+
+            return text;
+        }
+
+        function downloadText(text, filename) {
+            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function addResult(filename, success, error = '') {
+            const div = document.createElement('div');
+            div.className = `p-4 rounded-lg ${success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`;
+            div.innerHTML = `
+                <div class="flex items-center">
+                    <svg class="h-5 w-5 ${success ? 'text-green-600' : 'text-red-600'} mr-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="${success ? 'M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z' : 'M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z'}" clip-rule="evenodd"/>
+                    </svg>
+                    <span class="text-sm font-medium ${success ? 'text-green-800' : 'text-red-800'}">
+                        ${success ? 'Téléchargé : ' : 'Erreur : '}${filename}
+                    </span>
+                </div>
+                ${error ? `<p class="text-xs text-red-600 mt-1 ml-7">${error}</p>` : ''}
+            `;
+            results.appendChild(div);
+        }
+    </script>
+</body>
+</html>
