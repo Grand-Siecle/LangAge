@@ -195,15 +195,40 @@
                     }
                     pageText += '\n';
                 } else {
-                    const paragraphs = clusterLinesParagraphs(linesData);
+                    // Step 1: Calculate cluster labels for all lines
+                    const hposValues = linesData.map(l => l.hpos).sort((a, b) => a - b);
+                    const q1 = percentile(hposValues, 25);
 
-                    for (let para of paragraphs) {
-                        let paraText = '';
-                        let prevLine = '';
+                    const positions = linesData.map(line => [
+                        line.hpos < q1 ? q1 : line.hpos,
+                        line.vpos * 3
+                    ]);
 
-                        for (let lineData of para) {
-                            const lineText = extractLineText(lineData.element);
+                    const scaler = createStandardScaler(positions);
+                    const scaled = scaler ? scaler.transform(positions) : positions;
+                    const labels = dbscan(scaled, 1.5, 1);
 
+                    // Step 2: Loop through lines in order and check if cluster changes
+                    let paraText = '';
+                    let prevLine = '';
+                    let prevClusterId = labels[0];
+
+                    for (let i = 0; i < linesData.length; i++) {
+                        const lineData = linesData[i];
+                        const lineText = extractLineText(lineData.element);
+                        const currentClusterId = labels[i];
+
+                        // If cluster changed from previous line -> start new paragraph
+                        if (currentClusterId !== prevClusterId) {
+                            // Output current paragraph
+                            if (paraText.trim()) {
+                                pageText += paraText + '\n\n';
+                            }
+                            // Start new paragraph
+                            paraText = lineText;
+                            prevLine = lineText;
+                        } else {
+                            // Same cluster -> continue paragraph
                             if (prevLine.endsWith('-') || prevLine.endsWith('¬')) {
                                 paraText = paraText.slice(0, -1) + lineText;
                             } else if (prevLine) {
@@ -211,13 +236,15 @@
                             } else {
                                 paraText = lineText;
                             }
-
                             prevLine = lineText;
                         }
 
-                        if (paraText.trim()) {
-                            pageText += paraText + '\n\n';
-                        }
+                        prevClusterId = currentClusterId;
+                    }
+
+                    // Output final paragraph
+                    if (paraText.trim()) {
+                        pageText += paraText + '\n\n';
                     }
                 }
             }
@@ -338,33 +365,74 @@
 
         function clusterLinesParagraphs(linesData, eps = 1.5, minSamples = 1) {
             if (linesData.length === 0) return [];
+            if (linesData.length === 1) return [linesData];
 
-            const hposValues = linesData.map(l => l.hpos).sort((a, b) => a - b);
-            const q1 = percentile(hposValues, 25);
+            // Sort by vertical position first
+            const sortedLines = [...linesData].sort((a, b) => a.vpos - b.vpos);
+            
+            // Calculate average line height
+            const heights = [];
+            for (let i = 1; i < sortedLines.length; i++) {
+                heights.push(sortedLines[i].vpos - sortedLines[i-1].vpos);
+            }
+            const avgHeight = heights.reduce((a, b) => a + b, 0) / heights.length;
+            const largeGapThreshold = avgHeight * 1.8;
 
-            const positions = linesData.map(line => [
-                line.hpos < q1 ? q1 : line.hpos,
-                line.vpos
-            ]);
-
-            const scaler = createStandardScaler(positions);
-            const scaled = scaler ? scaler.transform(positions) : positions;
-
-            const labels = dbscan(scaled, eps, minSamples);
-
-            const clusters = {};
-            labels.forEach((label, i) => {
-                if (!clusters[label]) {
-                    clusters[label] = [];
+            // First pass: split by large vertical gaps
+            const paragraphGroups = [];
+            let currentGroup = [sortedLines[0]];
+            
+            for (let i = 1; i < sortedLines.length; i++) {
+                const gap = sortedLines[i].vpos - sortedLines[i-1].vpos;
+                
+                if (gap > largeGapThreshold) {
+                    // Large gap detected - start new paragraph
+                    paragraphGroups.push(currentGroup);
+                    currentGroup = [sortedLines[i]];
+                } else {
+                    currentGroup.push(sortedLines[i]);
                 }
-                clusters[label].push(linesData[i]);
-            });
+            }
+            paragraphGroups.push(currentGroup);
 
-            const paragraphs = Object.values(clusters).map(cluster => 
-                cluster.sort((a, b) => a.vpos - b.vpos)
-            );
+            // Second pass: apply DBSCAN within each group
+            const finalParagraphs = [];
+            
+            for (let group of paragraphGroups) {
+                if (group.length === 1) {
+                    finalParagraphs.push(group);
+                    continue;
+                }
 
-            return paragraphs;
+                const hposValues = group.map(l => l.hpos).sort((a, b) => a - b);
+                const q1 = percentile(hposValues, 25);
+
+                const positions = group.map(line => [
+                    line.hpos < q1 ? q1 : line.hpos,
+                    line.vpos
+                ]);
+
+                const scaler = createStandardScaler(positions);
+                const scaled = scaler ? scaler.transform(positions) : positions;
+
+                const labels = dbscan(scaled, eps, minSamples);
+
+                const clusters = {};
+                labels.forEach((label, i) => {
+                    if (!clusters[label]) {
+                        clusters[label] = [];
+                    }
+                    clusters[label].push(group[i]);
+                });
+
+                const groupParagraphs = Object.values(clusters).map(cluster => 
+                    cluster.sort((a, b) => a.vpos - b.vpos)
+                );
+                
+                finalParagraphs.push(...groupParagraphs);
+            }
+
+            return finalParagraphs;
         }
 
         function percentile(arr, p) {
