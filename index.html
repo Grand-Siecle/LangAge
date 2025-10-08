@@ -28,6 +28,37 @@
             </div>
 
             <div id="fileList" class="mt-6 space-y-2"></div>
+
+            <div id="settingsSection" class="hidden mt-8 pt-6 border-t border-slate-200">
+                <div class="mb-6">
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="text-sm font-medium text-slate-700">Paramètre de clustering (ε)</label>
+                        <div class="flex items-center">
+                            <span id="epsValue" class="text-sm font-semibold text-blue-600 mr-2">1.5</span>
+                            <button id="helpButton" class="text-slate-400 hover:text-slate-600 transition-colors">
+                                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <input type="range" id="epsSlider" min="0.5" max="3.0" step="0.1" value="1.5" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
+                    <div class="flex justify-between text-xs text-slate-500 mt-1">
+                        <span>0.5 (Strict)</span>
+                        <span>3.0 (Permissif)</span>
+                    </div>
+                    
+                    <div id="helpText" class="hidden mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-slate-700">
+                        <p class="font-medium mb-1">Qu'est-ce que le paramètre ε ?</p>
+                        <p>Ce paramètre contrôle la détection des paragraphes. Une <strong>valeur basse</strong> (0.5-1.0) crée plus de paragraphes distincts, idéal pour les textes avec des retraits marqués. Une <strong>valeur élevée</strong> (2.0-3.0) regroupe plus de lignes ensemble, adapté aux textes sans retrait clair.</p>
+                        <p class="mt-2"><strong>Conseil :</strong> Commencez avec 1.5 (défaut) et ajustez selon le résultat.</p>
+                    </div>
+                </div>
+
+                <button id="startButton" class="w-full bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors font-medium text-lg shadow-md hover:shadow-lg">
+                    Démarrer le traitement
+                </button>
+            </div>
         </div>
 
         <div id="progress" class="hidden bg-white rounded-xl shadow-lg p-6 mb-6">
@@ -47,11 +78,18 @@
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
         const fileList = document.getElementById('fileList');
+        const settingsSection = document.getElementById('settingsSection');
+        const epsSlider = document.getElementById('epsSlider');
+        const epsValue = document.getElementById('epsValue');
+        const helpButton = document.getElementById('helpButton');
+        const helpText = document.getElementById('helpText');
+        const startButton = document.getElementById('startButton');
         const progress = document.getElementById('progress');
         const progressBar = document.getElementById('progressBar');
         const progressText = document.getElementById('progressText');
         const results = document.getElementById('results');
         let files = [];
+        let processedFiles = {};
 
         dropZone.addEventListener('click', (e) => {
             if (e.target.tagName !== 'BUTTON') {
@@ -78,6 +116,19 @@
             handleFiles(e.target.files);
         });
 
+        epsSlider.addEventListener('input', (e) => {
+            epsValue.textContent = e.target.value;
+        });
+
+        helpButton.addEventListener('click', (e) => {
+            e.preventDefault();
+            helpText.classList.toggle('hidden');
+        });
+
+        startButton.addEventListener('click', () => {
+            processFiles();
+        });
+
         function handleFiles(newFiles) {
             files = Array.from(newFiles).filter(f => f.name.endsWith('.zip'));
             
@@ -86,8 +137,10 @@
                 return;
             }
             
+            processedFiles = {};
             displayFileList();
-            processFiles();
+            settingsSection.classList.remove('hidden');
+            results.innerHTML = '';
         }
 
         function displayFileList() {
@@ -113,6 +166,9 @@
                 return;
             }
             
+            const epsParam = parseFloat(epsSlider.value);
+            startButton.disabled = true;
+            startButton.classList.add('opacity-50', 'cursor-not-allowed');
             progress.classList.remove('hidden');
             results.innerHTML = '';
 
@@ -123,9 +179,9 @@
                 progressText.textContent = percent + '%';
 
                 try {
-                    const text = await processZip(file);
+                    const text = await processZip(file, epsParam);
                     const filename = file.name.replace('.zip', '.txt');
-                    downloadText(text, filename);
+                    processedFiles[filename] = text;
                     addResult(filename, true);
                 } catch (error) {
                     console.error('Erreur:', error);
@@ -135,10 +191,14 @@
 
             progressBar.style.width = '100%';
             progressText.textContent = '100%';
-            setTimeout(() => progress.classList.add('hidden'), 2000);
+            setTimeout(() => {
+                progress.classList.add('hidden');
+                startButton.disabled = false;
+                startButton.classList.remove('opacity-50', 'cursor-not-allowed');
+            }, 1000);
         }
 
-        async function processZip(file) {
+        async function processZip(file, epsParam) {
             const zip = await JSZip.loadAsync(file);
             let allText = '';
 
@@ -147,7 +207,7 @@
                     const content = await zipEntry.async('text');
                     const parser = new DOMParser();
                     const xmlDoc = parser.parseFromString(content, 'text/xml');
-                    const pageText = extractTextFromAlto(xmlDoc);
+                    const pageText = extractTextFromAlto(xmlDoc, epsParam);
                     allText += pageText + '\n' + '-'.repeat(80) + '\n\n';
                 }
             }
@@ -155,7 +215,7 @@
             return allText;
         }
 
-        function extractTextFromAlto(xmlDoc) {
+        function extractTextFromAlto(xmlDoc, epsParam) {
             const tags = xmlDoc.getElementsByTagName('Tags')[0];
             const tagMap = buildTagMap(tags);
             
@@ -195,7 +255,6 @@
                     }
                     pageText += '\n';
                 } else {
-                    // Step 1: Calculate cluster labels for all lines
                     const hposValues = linesData.map(l => l.hpos).sort((a, b) => a - b);
                     const q1 = percentile(hposValues, 25);
 
@@ -206,9 +265,8 @@
 
                     const scaler = createStandardScaler(positions);
                     const scaled = scaler ? scaler.transform(positions) : positions;
-                    const labels = dbscan(scaled, 1.5, 1);
+                    const labels = dbscan(scaled, epsParam, 1);
 
-                    // Step 2: Loop through lines in order and check if cluster changes
                     let paraText = '';
                     let prevLine = '';
                     let prevClusterId = labels[0];
@@ -218,17 +276,13 @@
                         const lineText = extractLineText(lineData.element);
                         const currentClusterId = labels[i];
 
-                        // If cluster changed from previous line -> start new paragraph
                         if (currentClusterId !== prevClusterId) {
-                            // Output current paragraph
                             if (paraText.trim()) {
                                 pageText += paraText + '\n\n';
                             }
-                            // Start new paragraph
                             paraText = lineText;
                             prevLine = lineText;
                         } else {
-                            // Same cluster -> continue paragraph
                             if (prevLine.endsWith('-') || prevLine.endsWith('¬')) {
                                 paraText = paraText.slice(0, -1) + lineText;
                             } else if (prevLine) {
@@ -242,7 +296,6 @@
                         prevClusterId = currentClusterId;
                     }
 
-                    // Output final paragraph
                     if (paraText.trim()) {
                         pageText += paraText + '\n\n';
                     }
@@ -361,78 +414,6 @@
             }
 
             return lineText.trim();
-        }
-
-        function clusterLinesParagraphs(linesData, eps = 1.5, minSamples = 1) {
-            if (linesData.length === 0) return [];
-            if (linesData.length === 1) return [linesData];
-
-            // Sort by vertical position first
-            const sortedLines = [...linesData].sort((a, b) => a.vpos - b.vpos);
-            
-            // Calculate average line height
-            const heights = [];
-            for (let i = 1; i < sortedLines.length; i++) {
-                heights.push(sortedLines[i].vpos - sortedLines[i-1].vpos);
-            }
-            const avgHeight = heights.reduce((a, b) => a + b, 0) / heights.length;
-            const largeGapThreshold = avgHeight * 1.8;
-
-            // First pass: split by large vertical gaps
-            const paragraphGroups = [];
-            let currentGroup = [sortedLines[0]];
-            
-            for (let i = 1; i < sortedLines.length; i++) {
-                const gap = sortedLines[i].vpos - sortedLines[i-1].vpos;
-                
-                if (gap > largeGapThreshold) {
-                    // Large gap detected - start new paragraph
-                    paragraphGroups.push(currentGroup);
-                    currentGroup = [sortedLines[i]];
-                } else {
-                    currentGroup.push(sortedLines[i]);
-                }
-            }
-            paragraphGroups.push(currentGroup);
-
-            // Second pass: apply DBSCAN within each group
-            const finalParagraphs = [];
-            
-            for (let group of paragraphGroups) {
-                if (group.length === 1) {
-                    finalParagraphs.push(group);
-                    continue;
-                }
-
-                const hposValues = group.map(l => l.hpos).sort((a, b) => a - b);
-                const q1 = percentile(hposValues, 25);
-
-                const positions = group.map(line => [
-                    line.hpos < q1 ? q1 : line.hpos,
-                    line.vpos
-                ]);
-
-                const scaler = createStandardScaler(positions);
-                const scaled = scaler ? scaler.transform(positions) : positions;
-
-                const labels = dbscan(scaled, eps, minSamples);
-
-                const clusters = {};
-                labels.forEach((label, i) => {
-                    if (!clusters[label]) {
-                        clusters[label] = [];
-                    }
-                    clusters[label].push(group[i]);
-                });
-
-                const groupParagraphs = Object.values(clusters).map(cluster => 
-                    cluster.sort((a, b) => a.vpos - b.vpos)
-                );
-                
-                finalParagraphs.push(...groupParagraphs);
-            }
-
-            return finalParagraphs;
         }
 
         function percentile(arr, p) {
@@ -567,23 +548,42 @@
             const iconPath = success 
                 ? 'M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z'
                 : 'M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z';
-            const message = success ? 'Téléchargé : ' : 'Erreur : ';
+            const message = success ? 'Traité : ' : 'Erreur : ';
             
             div.className = 'p-4 rounded-lg ' + bgClass;
             
-            let html = '<div class="flex items-center">';
-            html += '<svg class="h-5 w-5 ' + iconColor + ' mr-2" fill="currentColor" viewBox="0 0 20 20">';
+            let html = '<div class="flex items-center justify-between">';
+            html += '<div class="flex items-center">';
+            html += '<svg class="h-5 w-5 ' + iconColor + ' mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">';
             html += '<path fill-rule="evenodd" d="' + iconPath + '" clip-rule="evenodd"/>';
             html += '</svg>';
             html += '<span class="text-sm font-medium ' + textColor + '">' + message + filename + '</span>';
             html += '</div>';
             
+            if (success) {
+                html += '<button onclick="downloadFile(\'' + filename + '\')" class="ml-4 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center whitespace-nowrap">';
+                html += '<svg class="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">';
+                html += '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>';
+                html += '</svg>';
+                html += 'Télécharger';
+                html += '</button>';
+            }
+            
+            html += '</div>';
+            
             if (error) {
-                html += '<p class="text-xs text-red-600 mt-1 ml-7">' + error + '</p>';
+                html += '<p class="text-xs text-red-600 mt-2 ml-7">' + error + '</p>';
             }
             
             div.innerHTML = html;
             results.appendChild(div);
+        }
+
+        function downloadFile(filename) {
+            const text = processedFiles[filename];
+            if (text) {
+                downloadText(text, filename);
+            }
         }
     </script>
 </body>
