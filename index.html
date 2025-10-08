@@ -142,51 +142,191 @@
         function extractTextFromAlto(xmlDoc) {
             const textBlocks = xmlDoc.getElementsByTagName('TextBlock');
             let pageText = '';
-            let prevBlockType = null;
 
             for (let block of textBlocks) {
-                const blockType = block.getAttribute('TYPE') || 'default';
-                const textLines = block.getElementsByTagName('TextLine');
-                let blockText = '';
-                let prevLine = '';
+                const textLines = Array.from(block.getElementsByTagName('TextLine'));
+                
+                // Extraire les lignes avec leurs positions
+                const linesData = textLines.map(line => ({
+                    element: line,
+                    hpos: parseFloat(line.getAttribute('HPOS') || 0),
+                    vpos: parseFloat(line.getAttribute('VPOS') || 0)
+                }));
 
-                for (let i = 0; i < textLines.length; i++) {
-                    const line = textLines[i];
-                    const strings = line.getElementsByTagName('String');
-                    let lineText = '';
+                // Grouper les lignes en paragraphes avec DBSCAN
+                const paragraphs = clusterLinesParagraphs(linesData);
 
-                    for (let str of strings) {
-                        let content = str.getAttribute('CONTENT') || '';
-                        const subs = str.getAttribute('SUBS_CONTENT');
-                        
-                        // Normalisation
-                        content = normalizeText(content, subs);
-                        lineText += content + ' ';
+                // Traiter chaque paragraphe
+                for (let para of paragraphs) {
+                    let paraText = '';
+                    let prevLine = '';
+
+                    for (let lineData of para) {
+                        const strings = lineData.element.getElementsByTagName('String');
+                        let lineText = '';
+
+                        for (let str of strings) {
+                            let content = str.getAttribute('CONTENT') || '';
+                            const subs = str.getAttribute('SUBS_CONTENT');
+                            
+                            content = normalizeText(content, subs);
+                            lineText += content + ' ';
+                        }
+
+                        lineText = lineText.trim();
+
+                        // Gestion des césures
+                        if (prevLine.endsWith('-') || prevLine.endsWith('¬')) {
+                            paraText = paraText.slice(0, -1) + lineText;
+                        } else if (prevLine) {
+                            paraText += ' ' + lineText;
+                        } else {
+                            paraText = lineText;
+                        }
+
+                        prevLine = lineText;
                     }
 
-                    lineText = lineText.trim();
-
-                    // Gestion des césures
-                    if (prevLine.endsWith('-') || prevLine.endsWith('¬')) {
-                        blockText = blockText.slice(0, -1) + lineText;
-                    } else if (prevLine) {
-                        blockText += ' ' + lineText;
-                    } else {
-                        blockText = lineText;
+                    if (paraText.trim()) {
+                        pageText += paraText + '\n\n';
                     }
-
-                    prevLine = lineText;
                 }
-
-                if (blockType !== prevBlockType && pageText) {
-                    pageText += '\n\n';
-                }
-
-                pageText += blockText;
-                prevBlockType = blockType;
             }
 
             return pageText;
+        }
+
+        function clusterLinesParagraphs(linesData, eps = 0.5, minSamples = 1) {
+            if (linesData.length === 0) return [];
+
+            // Calculer Q1 pour HPOS (25e percentile)
+            const hposValues = linesData.map(l => l.hpos).sort((a, b) => a - b);
+            const q1 = percentile(hposValues, 25);
+
+            // Ajuster HPOS avec Q1 comme marge
+            const positions = linesData.map(line => [
+                line.hpos < q1 ? q1 : line.hpos,
+                line.vpos
+            ]);
+
+            // Normalisation (StandardScaler)
+            const scaler = createStandardScaler(positions);
+            const scaled = scaler ? scaler.transform(positions) : positions;
+
+            // DBSCAN clustering
+            const labels = dbscan(scaled, eps, minSamples);
+
+            // Grouper par label
+            const clusters = {};
+            labels.forEach((label, i) => {
+                if (!clusters[label]) {
+                    clusters[label] = [];
+                }
+                clusters[label].push(linesData[i]);
+            });
+
+            // Trier chaque cluster par VPOS
+            const paragraphs = Object.values(clusters).map(cluster => 
+                cluster.sort((a, b) => a.vpos - b.vpos)
+            );
+
+            return paragraphs;
+        }
+
+        function percentile(arr, p) {
+            if (arr.length === 0) return 0;
+            const index = (p / 100) * (arr.length - 1);
+            const lower = Math.floor(index);
+            const upper = Math.ceil(index);
+            const weight = index % 1;
+            return arr[lower] * (1 - weight) + arr[upper] * weight;
+        }
+
+        function createStandardScaler(points) {
+            if (points.length === 0) return null;
+            
+            const dims = points[0].length;
+            const means = [];
+            const stds = [];
+
+            // Calculer mean et std pour chaque dimension
+            for (let d = 0; d < dims; d++) {
+                const values = points.map(p => p[d]);
+                const mean = values.reduce((a, b) => a + b, 0) / values.length;
+                const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+                const std = Math.sqrt(variance) || 1;
+                means.push(mean);
+                stds.push(std);
+            }
+
+            return {
+                means: means,
+                stds: stds,
+                transform: function(points) {
+                    return points.map(point =>
+                        point.map((val, d) => (val - means[d]) / stds[d])
+                    );
+                },
+                inverseTransform: function(points) {
+                    return points.map(point =>
+                        point.map((val, d) => val * stds[d] + means[d])
+                    );
+                }
+            };
+        }
+
+        function dbscan(points, eps, minSamples) {
+            const n = points.length;
+            const labels = new Array(n).fill(-1);
+            let clusterId = 0;
+
+            function distance(p1, p2) {
+                return Math.sqrt(p1.reduce((sum, val, i) => sum + Math.pow(val - p2[i], 2), 0));
+            }
+
+            function getNeighbors(pointIdx) {
+                const neighbors = [];
+                for (let i = 0; i < n; i++) {
+                    if (i !== pointIdx && distance(points[pointIdx], points[i]) <= eps) {
+                        neighbors.push(i);
+                    }
+                }
+                return neighbors;
+            }
+
+            function expandCluster(pointIdx, neighbors, clusterId) {
+                labels[pointIdx] = clusterId;
+                const queue = [...neighbors];
+
+                while (queue.length > 0) {
+                    const currentIdx = queue.shift();
+
+                    if (labels[currentIdx] === -1) {
+                        labels[currentIdx] = clusterId;
+                        const currentNeighbors = getNeighbors(currentIdx);
+
+                        if (currentNeighbors.length >= minSamples) {
+                            queue.push(...currentNeighbors);
+                        }
+                    }
+                }
+            }
+
+            for (let i = 0; i < n; i++) {
+                if (labels[i] !== -1) continue;
+
+                const neighbors = getNeighbors(i);
+
+                if (neighbors.length < minSamples) {
+                    // reste bruit
+                    continue;
+                } else {
+                    expandCluster(i, neighbors, clusterId);
+                    clusterId++;
+                }
+            }
+
+            return labels;
         }
 
         function normalizeText(text, subs) {
@@ -194,7 +334,7 @@
             text = text.replace(/ſ/g, 's');
 
             // Apostrophe typographique
-            text = text.replace(/'/g, '’');
+            text = text.replace(/'/g, ''');
 
             // Abréviations
             if (subs && subs !== text) {
@@ -205,32 +345,18 @@
             text = text.replace(/ꝰ/g, 'us');
             text = text.replace(/q;/g, 'que');
             
-            // --- Étape 1 : marquer les lettres avec tilde ---
-            text = text.replace(/([ãẽĩõũ])/g, '§$1'); // § = marqueur temporaire
-
-            // --- Étape 2 : remplacer les tildes par voyelles nasales ---
-            text = text.replace(/§ã/g, '§an');
-            text = text.replace(/§õ/g, '§on');
-            text = text.replace(/§ẽ/g, '§en');
-            text = text.replace(/§ĩ/g, '§in');
-            text = text.replace(/§ũ/g, '§un');
-
-            // --- Étape 3 : appliquer la règle orthographique SEULEMENT après § ---
-            text = text.replace(/§an([bmp])/g, '§am$1');
-            text = text.replace(/§en([bmp])/g, '§em$1');
-            text = text.replace(/§in([bmp])/g, '§im$1');
-            text = text.replace(/§on([bmp])/g, '§om$1');
-            text = text.replace(/§un([bmp])/g, '§um$1');
-
-            // --- Étape 4 : enlever les marqueurs § ---
-            text = text.replace(/§/g, '');
+            // Tilde sur lettres -> m ou n
+            text = text.replace(/ã/g, 'an');
+            text = text.replace(/õ/g, 'on');
+            text = text.replace(/ẽ/g, 'en');
+            text = text.replace(/ĩ/g, 'in');
+            text = text.replace(/ũ/g, 'un');
 
             // Espaces insécables avant ponctuation
             text = text.replace(/\s*([,;:?!])/g, '\u00A0$1');
 
             return text;
         }
-
 
         function downloadText(text, filename) {
             const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
