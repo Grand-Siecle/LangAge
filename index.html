@@ -201,7 +201,7 @@
 
                     const positions = linesData.map(line => [
                         line.hpos < q1 ? q1 : line.hpos,
-                        line.vpos * 3
+                        line.vpos
                     ]);
 
                     const scaler = createStandardScaler(positions);
