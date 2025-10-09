@@ -511,24 +511,55 @@
         }
 
         function normalizeText(text, subs) {
-            text = text.replace(/ſ/g, 's');
-            text = text.replace(/'/g, '’');
+            if (!text) return "";
 
-            if (subs && subs !== text) {
-                text = text + '[' + subs + ']';
+            // --- Normalisations simples ---
+            text = text
+                .replace(/ſ/g, 's')   // s long
+                .replace(/'/g, '’');  // apostrophe typographique
+
+            // --- Abréviations médiévales ---
+            text = text
+                .replace(/ꝰ/g, 'ꝰ[us]')
+                .replace(/q;/g, 'q;[que]');
+
+            // --- Traitement des voyelles avec tilde ---
+            // Étape 1 : marquage temporaire
+            text = text.replace(/([ãẽĩõũ])/g, '§$1');
+
+            // Étape 2 : remplacement par voyelles nasales
+            const nasalMap = { 'ã': 'an', 'ẽ': 'en', 'ĩ': 'in', 'õ': 'on', 'ũ': 'un' };
+            for (const [tilde, nasale] of Object.entries(nasalMap)) {
+                text = text.replace(new RegExp('§' + tilde, 'g'), '§' + nasale);
             }
 
-            text = text.replace(/ꝰ/g, 'us');
-            text = text.replace(/q;/g, 'que');
-            text = text.replace(/ã/g, 'an');
-            text = text.replace(/õ/g, 'on');
-            text = text.replace(/ẽ/g, 'en');
-            text = text.replace(/ĩ/g, 'in');
-            text = text.replace(/ũ/g, 'un');
+            // Étape 3 : correction n → m devant b/m/p
+            const vowels = ['an', 'en', 'in', 'on', 'un'];
+            for (const v of vowels) {
+                text = text.replace(new RegExp(`§${v}([bmp])`, 'g'), `§${v[0]}m$1`);
+            }
+
+            // Étape 4 : annotation et nettoyage
+            text = text
+                .replace(/ã§([a-z]+)/g, 'ã[$1]')
+                .replace(/ẽ§([a-z]+)/g, 'ẽ[$1]')
+                .replace(/ĩ§([a-z]+)/g, 'ĩ[$1]')
+                .replace(/õ§([a-z]+)/g, 'õ[$1]')
+                .replace(/ũ§([a-z]+)/g, 'ũ[$1]')
+                .replace(/§/g, '');
+
+            // --- Ajout facultatif du subs ---
+            // (seulement si expansion détectée)
+            if (subs && subs !== text && text.includes('[')) {
+                text += `[${subs}]`;
+            }
+
+            // --- Typographie française : espace insécable avant ponctuation ---
             text = text.replace(/\s*([,;:?!])/g, '\u00A0$1');
 
             return text;
         }
+
 
         function downloadText(text, filename) {
             const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
