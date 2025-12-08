@@ -555,7 +555,7 @@
             }
 
             // --- Typographie française : espace insécable avant ponctuation ---
-            text = text.replace(/\s*([,;:?!])/g, '\u00A0$1');
+            text = text.replace(/\s*([;:?!])/g, '\u00A0$1');
 
             return text;
         }
