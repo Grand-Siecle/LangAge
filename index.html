@@ -526,24 +526,24 @@
                 .replace(/q;/g, 'q;[que]');
 
             // --- Traitement universel des tildes (combining tilde U+0303) ---
-                text = text.replace(/([a-z])\u0303/gi, (match, letter, offset, string) => {
-                    const nextChar = string[offset + match.length] || '';
-                    const expansion = 'bmp'.includes(nextChar.toLowerCase()) ? 'm' : 'n';
-                    return letter + '\u0303[' + expansion + ']';
-                });
+            text = text.replace(/([a-z])\u0303/gi, (match, letter, offset, string) => {
+                const nextChar = string[offset + match.length] || '';
+                const expansion = 'bmp'.includes(nextChar.toLowerCase()) ? 'm' : 'n';
+                return letter + '\u0303[' + expansion + ']';
+            });
 
-                // --- Re-normalisation en NFC (forme composée) pour l'affichage ---
-                text = text.normalize('NFC');
+            // --- Re-normalisation en NFC (forme composée) pour l'affichage ---
+            text = text.normalize('NFC');
 
-                // --- Ajout facultatif du subs ---
-                if (subs && subs !== text && text.includes('[')) {
-                    text += `[${subs}]`;
-                }
+            // --- Ajout facultatif du subs ---
+            if (subs && subs !== text && text.includes('[')) {
+                text += `[${subs}]`;
+            }
 
-                // --- Typographie française ---
-                text = text.replace(/\s*([;:?!])/g, '\u00A0$1');
+            // --- Typographie française ---
+            text = text.replace(/\s*([;:?!])/g, '\u00A0$1');
 
-                return text;
+            return text;
         }
 
 
