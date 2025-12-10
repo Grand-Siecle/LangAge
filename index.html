@@ -513,6 +513,8 @@
         function normalizeText(text, subs) {
             if (!text) return "";
 
+            text = text.normalize('NFD');
+
             // --- Normalisations simples ---
             text = text
                 .replace(/ſ/g, 's')   // s long
@@ -523,41 +525,25 @@
                 .replace(/ꝰ/g, 'ꝰ[us]')
                 .replace(/q;/g, 'q;[que]');
 
-            // --- Traitement des voyelles avec tilde ---
-            // Étape 1 : marquage temporaire
-            text = text.replace(/([ãẽĩõũ])/g, '§$1');
+            // --- Traitement universel des tildes (combining tilde U+0303) ---
+                text = text.replace(/([a-z])\u0303/gi, (match, letter, offset, string) => {
+                    const nextChar = string[offset + match.length] || '';
+                    const expansion = 'bmp'.includes(nextChar.toLowerCase()) ? 'm' : 'n';
+                    return letter + '\u0303[' + expansion + ']';
+                });
 
-            // Étape 2 : remplacement par voyelles nasales
-            const nasalMap = { 'ã': 'an', 'ẽ': 'en', 'ĩ': 'in', 'õ': 'on', 'ũ': 'un' };
-            for (const [tilde, nasale] of Object.entries(nasalMap)) {
-                text = text.replace(new RegExp('§' + tilde, 'g'), '§' + nasale);
-            }
+                // --- Re-normalisation en NFC (forme composée) pour l'affichage ---
+                text = text.normalize('NFC');
 
-            // Étape 3 : correction n → m devant b/m/p
-            const vowels = ['an', 'en', 'in', 'on', 'un'];
-            for (const v of vowels) {
-                text = text.replace(new RegExp(`§${v}([bmp])`, 'g'), `§${v[0]}m$1`);
-            }
+                // --- Ajout facultatif du subs ---
+                if (subs && subs !== text && text.includes('[')) {
+                    text += `[${subs}]`;
+                }
 
-            // Étape 4 : annotation et nettoyage
-            text = text
-                .replace(/ã§([a-z]+)/g, 'ã[$1]')
-                .replace(/ẽ§([a-z]+)/g, 'ẽ[$1]')
-                .replace(/ĩ§([a-z]+)/g, 'ĩ[$1]')
-                .replace(/õ§([a-z]+)/g, 'õ[$1]')
-                .replace(/ũ§([a-z]+)/g, 'ũ[$1]')
-                .replace(/§/g, '');
+                // --- Typographie française ---
+                text = text.replace(/\s*([;:?!])/g, '\u00A0$1');
 
-            // --- Ajout facultatif du subs ---
-            // (seulement si expansion détectée)
-            if (subs && subs !== text && text.includes('[')) {
-                text += `[${subs}]`;
-            }
-
-            // --- Typographie française : espace insécable avant ponctuation ---
-            text = text.replace(/\s*([;:?!])/g, '\u00A0$1');
-
-            return text;
+                return text;
         }
 
 
