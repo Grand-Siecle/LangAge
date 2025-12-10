@@ -527,9 +527,9 @@
 
             // --- Traitement universel des tildes (combining tilde U+0303) ---
             text = text.replace(/([a-z])\u0303/gi, (match, letter, offset, string) => {
-                const nextChar = string[offset + match.length] || '';
-                const expansion = 'bmp'.includes(nextChar.toLowerCase()) ? 'm' : 'n';
-                return letter + '\u0303[' + expansion + ']';
+            const nextChar = string[offset + match.length] || '';
+            const expansion = (nextChar && 'bmp'.includes(nextChar.toLowerCase())) ? 'm' : 'n';
+            return letter + '\u0303[' + expansion + ']';
             });
 
             // --- Re-normalisation en NFC (forme composée) pour l'affichage ---
