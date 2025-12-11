@@ -401,6 +401,109 @@
             return 'DefaultZone';
         }
 
+        function detectLanguage(text) {
+            if (!text || text.length < 5) return 'fr'; // Très court = français par défaut
+            
+            const normalized = text.toLowerCase();
+            
+            // === MOTS LATINS COURANTS ===
+            const latinWords = [
+                // Conjonctions et particules
+                'et', 'sed', 'aut', 'nam', 'enim', 'autem', 'atque', 'ac', 'neque', 'nec',
+                'vel', 'an', 'ergo', 'igitur', 'itaque', 'tamen', 'quoque', 'quidem',
+                // Pronoms et démonstratifs
+                'qui', 'quae', 'quod', 'quis', 'quid', 'hic', 'haec', 'hoc', 'ille', 'illa',
+                'illud', 'iste', 'ista', 'istud', 'is', 'ea', 'id', 'ipse', 'ipsa', 'ipsum',
+                // Prépositions
+                'cum', 'in', 'ex', 'ab', 'ad', 'de', 'per', 'pro', 'sine', 'inter', 'post',
+                'ante', 'sub', 'super', 'apud', 'contra', 'circa', 'propter',
+                // Verbes courants
+                'est', 'sunt', 'esse', 'erat', 'erant', 'fuit', 'fuerunt', 'sit', 'sint',
+                'potest', 'possunt', 'posse', 'possum', 'debet', 'debent', 'vult', 'volunt',
+                'facit', 'faciunt', 'facere', 'fecit', 'dicit', 'dicunt', 'dixit', 'habet',
+                'habent', 'habere', 'venit', 'veniunt', 'dat', 'dant', 'dare',
+                // Adverbes
+                'non', 'ne', 'sic', 'ita', 'tam', 'modo', 'nunc', 'tunc', 'semper', 'numquam',
+                'etiam', 'quoque', 'vero', 'autem', 'enim', 'igitur', 'ergo', 'valde',
+                // Autres mots courants
+                'res', 'rei', 'rem', 'homo', 'hominis', 'deus', 'dei', 'deo', 'deum',
+                'animus', 'corpus', 'tempus', 'locus', 'vita', 'mors', 'bellum', 'pax'
+            ];
+            
+            // === MOTS FRANÇAIS COURANTS ===
+            const frenchWords = [
+                // Articles
+                'le', 'la', 'les', 'un', 'une', 'des', 'du', 'au', 'aux',
+                // Prépositions
+                'de', 'à', 'dans', 'pour', 'par', 'sur', 'avec', 'sans', 'sous', 'vers',
+                'chez', 'contre', 'entre', 'parmi', 'selon', 'durant', 'pendant',
+                // Pronoms
+                'je', 'tu', 'il', 'elle', 'nous', 'vous', 'ils', 'elles', 'on',
+                'me', 'te', 'se', 'lui', 'leur', 'qui', 'que', 'quoi', 'dont', 'où',
+                'ce', 'cet', 'cette', 'ces', 'mon', 'ton', 'son', 'ma', 'ta', 'sa',
+                'mes', 'tes', 'ses', 'notre', 'votre', 'leur', 'nos', 'vos', 'leurs',
+                // Conjonctions
+                'et', 'ou', 'mais', 'donc', 'or', 'ni', 'car', 'que', 'si', 'comme',
+                'quand', 'lorsque', 'puisque', 'quoique', 'afin', 'tandis',
+                // Verbes auxiliaires et courants
+                'est', 'sont', 'être', 'était', 'étaient', 'été', 'sera', 'seront',
+                'ai', 'as', 'a', 'avons', 'avez', 'ont', 'avoir', 'avait', 'avaient', 'eu',
+                'fait', 'font', 'faire', 'faisait', 'peut', 'peuvent', 'pouvoir', 'pouvait',
+                'doit', 'doivent', 'devoir', 'veut', 'vouloir', 'dit', 'disent', 'dire',
+                // Adverbes
+                'ne', 'pas', 'plus', 'très', 'bien', 'mal', 'aussi', 'encore', 'déjà',
+                'toujours', 'jamais', 'souvent', 'parfois', 'beaucoup', 'peu', 'trop',
+                'assez', 'tant', 'autant', 'ainsi', 'alors', 'donc', 'puis',
+                // Autres mots courants
+                'chose', 'point', 'homme', 'femme', 'jour', 'temps', 'monde', 'vie',
+                'mort', 'dieu', 'roi', 'peuple', 'terre', 'ciel'
+            ];
+            
+            // === TERMINAISONS TYPIQUES LATINES ===
+            const latinEndings = [
+                /\w+us\b/, /\w+um\b/, /\w+am\b/, /\w+em\b/, /\w+im\b/,
+                /\w+ae\b/, /\w+is\b/, /\w+ibus\b/, /\w+arum\b/, /\w+orum\b/,
+                /\w+atur\b/, /\w+antur\b/, /\w+etur\b/, /\w+untur\b/
+            ];
+            
+            // === TERMINAISONS TYPIQUES FRANÇAISES ===
+            const frenchEndings = [
+                /\w+tion\b/, /\w+ment\b/, /\w+eur\b/, /\w+euse\b/, /\w+ité\b/,
+                /\w+ance\b/, /\w+ence\b/, /\w+isme\b/, /\w+esse\b/
+            ];
+            
+            let latinScore = 0;
+            let frenchScore = 0;
+            
+            // Compter les mots latins
+            latinWords.forEach(word => {
+                const regex = new RegExp('\\b' + word + '\\b', 'g');
+                const matches = normalized.match(regex);
+                if (matches) latinScore += matches.length;
+            });
+            
+            // Compter les mots français
+            frenchWords.forEach(word => {
+                const regex = new RegExp('\\b' + word + '\\b', 'g');
+                const matches = normalized.match(regex);
+                if (matches) frenchScore += matches.length;
+            });
+            
+            // Bonus pour les terminaisons typiques (poids plus faible)
+            latinEndings.forEach(pattern => {
+                const matches = normalized.match(pattern);
+                if (matches) latinScore += matches.length * 0.3;
+            });
+            
+            frenchEndings.forEach(pattern => {
+                const matches = normalized.match(pattern);
+                if (matches) frenchScore += matches.length * 0.3;
+            });
+                    
+            // Si score latin nettement supérieur (30% de plus)
+            return latinScore > frenchScore * 1.3 ? 'la' : 'fr';
+        }
+
         function extractLineText(lineElement) {
             const strings = lineElement.getElementsByTagName('String');
             let lineText = '';
@@ -409,7 +512,9 @@
                 let content = str.getAttribute('CONTENT') || '';
                 const subs = str.getAttribute('SUBS_CONTENT');
                 
-                content = normalizeText(content, subs);
+                const language = detectLanguage(content);
+                console.log("language : " + language)
+                content = normalizeText(content, subs, language);
                 lineText += content + ' ';
             }
 
@@ -510,7 +615,7 @@
             return labels;
         }
 
-        function normalizeText(text, subs) {
+        function normalizeText(text, subs, language = 'fr') {
             if (!text) return "";
 
             text = text.normalize('NFD');
@@ -527,10 +632,19 @@
 
             // --- Traitement universel des tildes (combining tilde U+0303) ---
             text = text.replace(/([a-z])\u0303/gi, (match, letter, offset, string) => {
-            const nextChar = string[offset + match.length] || '';
-            const expansion = (nextChar && 'bmp'.includes(nextChar.toLowerCase())) ? 'm' : 'n';
-            return letter + '\u0303[' + expansion + ']';
-            });
+                        const nextChar = string[offset + match.length] || '';
+                        let expansion;
+                        
+                        if (language === 'la') {
+                            // Latin : par défaut 'm'
+                            expansion = 'm';
+                        } else {
+                            // Français : 'n' par défaut, 'm' devant b/m/p
+                            expansion = (nextChar && 'bmp'.includes(nextChar.toLowerCase())) ? 'm' : 'n';
+                        }
+
+                        return letter + '\u0303[' + expansion + ']';
+                    });
 
             // --- Re-normalisation en NFC (forme composée) pour l'affichage ---
             text = text.normalize('NFC');
