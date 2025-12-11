@@ -284,7 +284,7 @@
                             prevLine = lineText;
                         } else {
                             if (prevLine.endsWith('-') || prevLine.endsWith('¬')) {
-                                paraText = paraText.slice(0, -1) + lineText;
+                                paraText += lineText;
                             } else if (prevLine) {
                                 paraText += ' ' + lineText;
                             } else {
