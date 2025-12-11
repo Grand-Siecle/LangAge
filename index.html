@@ -622,7 +622,9 @@
             // --- Normalisations simples ---
             text = text
                 .replace(/ſ/g, 's')   // s long
-                .replace(/'/g, '’');  // apostrophe typographique
+                .replace(/'/g, '’')  // apostrophe typographique
+                .replace(/ß/g, 'ss')  // eszett
+                .replace(/&/g, 'et'); // esperluette
 
             // --- Abréviations médiévales ---
             text = text
