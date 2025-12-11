@@ -513,7 +513,6 @@
                 const subs = str.getAttribute('SUBS_CONTENT');
                 
                 const language = detectLanguage(content);
-                console.log("language : " + language)
                 content = normalizeText(content, subs, language);
                 lineText += content + ' ';
             }
